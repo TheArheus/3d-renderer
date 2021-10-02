@@ -1,9 +1,12 @@
 #if !defined(DISPLAY_H_)
 
+#define _USE_MATH_DEFINES
+
 #include <SDL2\SDL.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <intrin.h>
 
 typedef uint8_t     u8;
 typedef uint16_t    u16;
@@ -29,6 +32,7 @@ extern u32              window_width;
 extern u32              window_height;
 
 #include "hmath.h"
+#include "matrix.h"
 #include "triangle.h"
 #include "mesh.h"
 #include "array.h"
@@ -49,6 +53,7 @@ void DrawGrid(u32);
 void DrawRect(v2, u32, u32, u32);
 void DrawLine(v2, v2, u32);
 void DrawTriangle(triangle_t, u32);
+void DrawTriangleFast(triangle_t, u32);
 void DestroyWindow();
 
 #define DISPLAY_H_

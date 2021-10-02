@@ -20,6 +20,26 @@ union v3
     {
         r32 R, G, B;
     };
+    struct
+    {
+        v2 XY;
+        r32 Ignored0_;
+    };
+    struct
+    {
+        r32 Ignored1_;
+        v2 YZ;
+    };
+    struct
+    {
+        v2 RG;
+        r32 Ignored0_;
+    };
+    struct
+    {
+        r32 Ignored1_;
+        v2 GB;
+    };
     r32 E[3];
 };
 
@@ -32,6 +52,34 @@ union v4
     struct
     {
         r32 R, G, B, A;
+    };
+    struct
+    {
+        v2 XY;
+        r32 Ignored0_;
+        r32 Ignored1_;
+    };
+    struct
+    {
+        r32 Ignored2_;
+        v2 YZ;
+        r32 Ignored3_;
+    };
+    struct
+    {
+        r32 Ignored4_;
+        r32 Ignored5_;
+        v2 ZW;
+    };
+    struct
+    {
+        v3 XYZ;
+        r32 Ignored6_;
+    };
+    struct
+    {
+        v3 RGB;
+        r32 Ignored6_;
     };
     r32 E[4];
 };
@@ -91,6 +139,17 @@ V4(r32 X, r32 Y, r32 Z, r32 W)
     Result.X = X;
     Result.Y = Y;
     Result.Z = Z;
+    Result.W = W;
+
+    return Result;
+}
+
+inline v4
+ToV4(v3 XYZ, r32 W)
+{
+    v4 Result = {};
+
+    Result.XYZ = XYZ;
     Result.W = W;
 
     return Result;
@@ -304,6 +363,18 @@ operator-(v3 A, v3 B)
     return Result;
 }
 
+inline v3 
+operator-(v3 A)
+{
+    v3 Result = {};
+
+    Result.X = -A.X;
+    Result.Y = -A.Y;
+    Result.Z = -A.Z;
+
+    return Result;
+}
+
 inline v3
 operator-(v3 A, r32 B)
 {
@@ -392,6 +463,153 @@ operator*=(v3& A, r32 B)
 // 4-D Vector operations
 //
 
+inline v4 
+operator+(v4 A, v4 B)
+{
+    v4 Result = {};
+
+    Result.X = A.X + B.X;
+    Result.Y = A.Y + B.Y;
+    Result.Z = A.Z + B.Z;
+    Result.W = A.W + B.W;
+
+    return Result;
+}
+
+inline v4
+operator+(v4 A, r32 B)
+{
+    v4 Result = {};
+
+    Result.X = A.X + B;
+    Result.Y = A.Y + B;
+    Result.Z = A.Z + B;
+
+    return Result;
+}
+
+inline v4
+operator+(r32 A, v4 B)
+{
+    B = B + A;
+
+    return B;
+}
+
+inline v4&
+operator+=(v4& A, v4 B)
+{
+    A = A + B;
+
+    return A;
+}
+
+inline v4&
+operator+=(v4& A, r32 B)
+{
+    A = A + B;
+
+    return A;
+}
+
+inline v4 
+operator-(v4 A, v4 B)
+{
+    v4 Result = {};
+
+    Result.X = A.X - B.X;
+    Result.Y = A.Y - B.Y;
+    Result.Z = A.Z - B.Z;
+    Result.W = A.W - B.W;
+
+    return Result;
+}
+
+inline v4
+operator-(v4 A, r32 B)
+{
+    v4 Result = {};
+
+    Result.X = A.X - B;
+    Result.Y = A.Y - B;
+    Result.Z = A.Z - B;
+
+    return Result;
+}
+
+inline v4
+operator-(r32 A, v4 B)
+{
+    B = B - A;
+
+    return B;
+}
+
+inline v4&
+operator-=(v4& A, v4 B)
+{
+    A = A - B;
+
+    return A;
+}
+
+inline v4&
+operator-=(v4& A, r32 B)
+{
+    A = A - B;
+
+    return A;
+}
+
+inline v4
+operator*(v4 A, v4 B)
+{
+    v4 Result = {};
+
+    Result.X = A.X*B.X;
+    Result.Y = A.Y*B.Y;
+    Result.Z = A.Z*B.Z;
+    Result.W = A.W*B.W;
+
+    return Result;
+}
+
+inline v4
+operator*(v4 A, r32 B)
+{
+    v4 Result = {};
+
+    Result.X = A.X*B;
+    Result.Y = A.Y*B;
+    Result.Z = A.Z*B;
+    Result.W = A.W*B;
+
+    return Result;
+}
+
+inline v4
+operator*(r32 A, v4 B)
+{
+    B = B*A;
+
+    return B;
+}
+
+inline v4&
+operator*=(v4& A, v4 B)
+{
+    A = A*B;
+
+    return A;
+}
+
+inline v4&
+operator*=(v4& A, r32 B)
+{
+    A = A * B;
+
+    return A;
+}
 
 //
 // Other operations on vectors
@@ -493,6 +711,54 @@ inline r32
 Length(v3 A)
 {
     return SquareRoot(LengthSq(A));
+}
+
+inline r32
+Clamp(r32 V, r32 Min, r32 Max)
+{
+    r32 Result = V;
+    if(V < Min){ Result = Min; }
+    if(V > Max){ Result = Max; }
+    return Result;
+}
+
+inline r32
+Clamp01(r32 V)
+{
+    r32 Result = Clamp(V, 0.0f, 1.0f);
+    return Result;
+}
+
+inline v3
+Clamp(v3 V, r32 Min, r32 Max)
+{
+    v3 Result = V;
+    if((V.X < Min) && (V.Y < Min) && (V.Z < Min)){ Result = V3(Min, Min, Min); }
+    if((V.X > Max) && (V.Y > Max) && (V.Z > Max)){ Result = V3(Max, Max, Max); }
+    return Result;
+}
+
+inline v3
+Clamp01(v3 V)
+{
+    v3 Result = Clamp(V, 0.0f, 1.0f);
+    return Result;
+}
+
+inline v4
+Clamp(v4 V, r32 Min, r32 Max)
+{
+    v4 Result = V;
+    if((V.X < Min) && (V.Y < Min) && (V.Z < Min) && (V.W < Min)){ Result = V4(Min, Min, Min, Min); }
+    if((V.X > Max) && (V.Y > Max) && (V.Z > Max) && (V.W > Max)){ Result = V4(Max, Max, Max, Max); }
+    return Result;
+}
+
+inline v4
+Clamp01(v4 V)
+{
+    v4 Result = Clamp(V, 0.0f, 1.0f);
+    return Result;
 }
 
 #endif
