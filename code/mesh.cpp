@@ -21,23 +21,23 @@ v3 CubeVertices[N_CUBE_VERTICES] =
 face_t CubeMeshes[N_CUBE_MESHES] = 
 {
     // front
-    {1, 2, 3, 0xFFFF0000},
-    {1, 3, 4, 0xFFFF0000},
+    {1, 2, 3, 0xFFFFFFFF},
+    {1, 3, 4, 0xFFFFFFFF},
     // right
-    {4, 3, 5, 0xFF00FF00},
-    {4, 5, 6, 0xFF00FF00},
+    {4, 3, 5, 0xFFFFFFFF},
+    {4, 5, 6, 0xFFFFFFFF},
     // back
-    {6, 5, 7, 0xFF0000FF},
-    {6, 7, 8, 0xFF0000FF},
+    {6, 5, 7, 0xFFFFFFFF},
+    {6, 7, 8, 0xFFFFFFFF},
     // left
-    {8, 7, 2, 0xFFFFFF00},
-    {8, 2, 1, 0xFFFFFF00},
+    {8, 7, 2, 0xFFFFFFFF},
+    {8, 2, 1, 0xFFFFFFFF},
     // top
-    {2, 7, 5, 0xFFFF00FF},
-    {2, 5, 3, 0xFFFF00FF},
+    {2, 7, 5, 0xFFFFFFFF},
+    {2, 5, 3, 0xFFFFFFFF},
     // bottom
-    {6, 8, 1, 0xFF00FFFF},
-    {6, 1, 4, 0xFF00FFFF},
+    {6, 8, 1, 0xFFFFFFFF},
+    {6, 1, 4, 0xFFFFFFFF},
 };
 
 struct vertex_indices 
@@ -162,13 +162,13 @@ ParseObjLine(char* Line)
         {
             face_t Face = ParseFace(Line);
 
+            Face.Color = 0xFFFFFFFF;
             ArrayPush(Mesh.Meshes, Face, face_t);
             break;
         }
         PrevChar = Char;
     }
 }
-
 
 void LoadObjFileData(char* FileName)
 {
@@ -181,39 +181,3 @@ void LoadObjFileData(char* FileName)
         ParseObjLine(Line);
     }
 }
-
-/*
-void LoadObjFileData(char* FileName)
-{
-    FILE* file = NULL;
-    fopen_s(&file, FileName, "r");
-    
-    char line[128];
-    while(fgets(line, 128, file))
-    {
-        if(strncmp(line, "v ", 2) == 0)
-        {
-            v3 Vertex = {};
-            sscanf(line, "v %f %f %f", &Vertex.X, &Vertex.Y, &Vertex.Z);
-            ArrayPush(Mesh.Vertices, Vertex, v3);
-        }
-
-        if(strncmp(line, "f ", 2) == 0)
-        {
-            face_t Face = {};
-            int VertexIndices[3];
-            int TextureIndices[3];
-            int NormalIndices[3];
-            sscanf(line, "f %i/%i/%i %i/%i/%i %i/%i/%i", &VertexIndices[0], &TextureIndices[0], &NormalIndices[0], 
-                                                         &VertexIndices[1], &TextureIndices[1], &NormalIndices[1],
-                                                         &VertexIndices[2], &TextureIndices[2], &NormalIndices[2]);
-
-            Face.a = VertexIndices[0];
-            Face.b = VertexIndices[1];
-            Face.c = VertexIndices[2];
-
-            ArrayPush(Mesh.Meshes, Face, face_t);
-        }
-    }
-}
-*/

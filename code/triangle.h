@@ -33,6 +33,7 @@ triangle_t Triangle(v2 A, v2 B, v2 C)
 }
 
 void DrawFilledTriangle(v2 A, v2 B, v2 C, u32 Color);
+void DrawFilledTriangleFast(v2 A, v2 B, v2 C, u32 Color);
 
 
 #endif
