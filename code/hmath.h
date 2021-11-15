@@ -1,4 +1,4 @@
-#if !defined (HMATH_H_)
+#if !defined(HMATH_H_)
 #define HMATH_H_
 
 union v2
@@ -96,18 +96,6 @@ V2(r32 X, r32 Y)
 }
 
 inline v3
-V3(r32 V)
-{
-    v3 Result = {};
-
-    Result.X = V;
-    Result.Y = V;
-    Result.Z = V;
-
-    return Result;
-}
-
-inline v3
 V3(r32 X, r32 Y, r32 Z)
 {
     v3 Result = {};
@@ -143,18 +131,6 @@ V3(r32 X, v2 A)
     return Result;
 }
 
-inline v3
-V3Copy(v3* V)
-{
-    v3 Result = {};
-
-    Result.X = V->X;
-    Result.Y = V->Y;
-    Result.Z = V->Z;
-
-    return Result;
-}
-
 inline v4
 V4(r32 X, r32 Y, r32 Z, r32 W)
 {
@@ -169,7 +145,7 @@ V4(r32 X, r32 Y, r32 Z, r32 W)
 }
 
 inline v4
-V4(v3 XYZ, r32 W)
+ToV4(v3 XYZ, r32 W)
 {
     v4 Result = {};
 
@@ -181,8 +157,6 @@ V4(v3 XYZ, r32 W)
 
 // Basing vector operations
 //
-
-
 //
 // 2-D Vector operations
 //
@@ -485,51 +459,6 @@ operator*=(v3& A, r32 B)
     return A;
 }
 
-inline v3
-operator/(v3 A, v3 B)
-{
-    v3 Result;
-
-    Result.X = A.X / B.X;
-    Result.Y = A.Y / B.Y;
-    Result.Z = A.Z / B.Z;
-
-    return Result;
-}
-
-inline v3
-operator/(v3 A, r32 B)
-{
-    v3 Result;
-
-    Result.X = A.X / B;
-    Result.Y = A.Y / B;
-    Result.Z = A.Z / B;
-
-    return Result;
-}
-
-inline v3
-operator/(r32 A, v3 B)
-{
-    v3 Result = B / A;
-    return Result;
-}
-
-inline v3&
-operator/=(v3& A, v3 B)
-{
-    A = A / B;
-    return A;
-}
-
-inline v3&
-operator/=(v3& A, r32 B)
-{
-    A = A / B;
-    return A;
-}
-
 //
 // 4-D Vector operations
 //
@@ -645,14 +574,6 @@ operator*(v4 A, v4 B)
     return Result;
 }
 
-inline v4&
-operator*=(v4& A, v4 B)
-{
-    A = A*B;
-
-    return A;
-}
-
 inline v4
 operator*(v4 A, r32 B)
 {
@@ -672,6 +593,14 @@ operator*(r32 A, v4 B)
     B = B*A;
 
     return B;
+}
+
+inline v4&
+operator*=(v4& A, v4 B)
+{
+    A = A*B;
+
+    return A;
 }
 
 inline v4&
@@ -722,14 +651,6 @@ rotate_z(v3 P, r32 A)
     return Result;
 }
 
-inline r32
-Cross(v2 A, v2 B)
-{
-    r32 Result = A.X * B.Y - A.Y * B.X;
-
-    return Result;
-}
-
 inline v3
 Cross(v3 A, v3 B)
 {
@@ -745,43 +666,7 @@ Cross(v3 A, v3 B)
 inline r32
 AbsoluteValue(r32 A)
 {
-    r32 Result = (r32)fabs(A);
-    return Result;
-}
-
-inline v2
-AbsoluteValue(v2 A)
-{
-    v2 Result = {};
-
-    Result.X = AbsoluteValue(A.X);
-    Result.Y = AbsoluteValue(A.Y);
-
-    return Result;
-}
-
-inline v3
-AbsoluteValue(v3 A)
-{
-    v3 Result = {};
-
-    Result.X = AbsoluteValue(A.X);
-    Result.Y = AbsoluteValue(A.Y);
-    Result.Z = AbsoluteValue(A.Z);
-
-    return Result;
-}
-
-inline v4
-AbsoluteValue(v4 A)
-{
-    v4 Result = {};
-
-    Result.X = AbsoluteValue(A.X);
-    Result.Y = AbsoluteValue(A.Y);
-    Result.Z = AbsoluteValue(A.Z);
-    Result.W = AbsoluteValue(A.W);
-
+    r32 Result = fabs(A);
     return Result;
 }
 
@@ -873,59 +758,6 @@ inline v4
 Clamp01(v4 V)
 {
     v4 Result = Clamp(V, 0.0f, 1.0f);
-    return Result;
-}
-
-inline r32
-Lerp(r32 A, r32 t, r32 B)
-{
-    r32 Result = (1 - t)*A + t*B;
-
-    return Result;
-}
-
-inline v3
-Lerp(v3 A, r32 t, v3 B)
-{
-    v3 Result = (1 - t)*A + t*B;
-
-    return Result;
-}
-
-inline i32 
-PointInTriangle(v2 P, v2 A, v2 B, v2 C)
-{
-    v2 AC = C - A;
-    v2 AB = B - A;
-    v2 AP = P - A;
-
-    r32 w1 = (A.X*AC.Y + AP.Y*AC.X - P.X*AC.Y) / (AB.Y*AC.X - (AB.X)*AC.Y);
-    r32 w2 = (AP.Y - w1*AB.Y)/AC.Y;
-
-    return ((w1 >= 0.0f) && (w2 >= 0.0f) && ((w1 + w2) <= 1.0f));
-}
-
-inline v3
-GetBarycentricWeights(v2 A, v2 B, v2 C, v2 P)
-{
-    v3 Result = {};
-
-    v2 AB = B - A;
-    v2 BC = C - B;
-    v2 AC = C - A;
-    v2 AP = P - A;
-    v2 BP = P - B;
-
-    r32 TriangleArea = Cross(AB, AC);
-    
-    r32 Alpha = (Cross(BC, BP)) / TriangleArea;
-    r32 Beta  = (Cross(AP, AC)) / TriangleArea;
-    r32 Gamma = 1 - Alpha - Beta;
-
-    //if(PointInTriangle(P, A, B, C))
-    {
-        Result = V3(Alpha, Beta, Gamma);
-    }
     return Result;
 }
 
