@@ -1,25 +1,21 @@
 #if !defined(MESH_H)
 #define MESH_H
 
-#define N_CUBE_VERTICES (8)
-extern v3 CubeVertices[N_CUBE_VERTICES];
-
-#define N_CUBE_MESHES (6*2)
-extern face_t CubeMeshes[N_CUBE_MESHES];
-
 typedef struct
 {
     v3* Vertices;
     face_t* Meshes;
-
+    upng_t* Texture;
     v3 Translation;
     v3 Rotation;
     v3 Scale;
 } mesh_t;
 
-extern mesh_t Mesh;
+extern mesh_t Meshes[1 << 4];
+extern i32 MeshesCount;
 
-void LoadCubeMeshData(void);
-void LoadObjFileData(char);
+void LoadMeshData(mesh_t*, char*);
+static void LoadTexture(mesh_t* Mesh, char* Filename);
+void LoadMesh(char* Object, char* Texture, v3 Scaling, v3 Rotating, v3 Translating);
 
 #endif

@@ -1,5 +1,4 @@
 #include <emmintrin.h>
-
 static v2
 FindTriangleMid(v2 A, v2 B, v2 C)
 {
@@ -13,66 +12,234 @@ FindTriangleMid(v2 A, v2 B, v2 C)
     return Result;
 }
 
-static void SwapVectors(v2* A, v2* B)
-{
-    v2 Temp = *A;
-    *A = *B;
-    *B = Temp;
+
+#define SwapTwoObjects_(type) void SwapTwo_##type(type* A, type* B) \
+{                                                                   \
+    type Temp = *A;                                                 \
+    *A = *B;                                                        \
+    *B = Temp;                                                      \
 }
 
-static void FillFlatBottomTriangle(v2 A, v2 B, v2 C, u32 Color) // A(x0, y0), B(x1, y1), C(x2, y2)
+SwapTwoObjects_(v2);
+SwapTwoObjects_(v4);
+SwapTwoObjects_(tex2d);
+
+v3 GetTriangleNormal(v4 Vertices[3])
 {
-    r32 Slope1 = (r32)((int)B.X - (int)A.X) / ((int)B.Y - (int)A.Y);
-    r32 Slope2 = (r32)((int)C.X - (int)A.X) / ((int)C.Y - (int)A.Y);
+    v3 A = Vertices[0].XYZ;
+    v3 B = Vertices[1].XYZ;
+    v3 C = Vertices[2].XYZ;
 
-    r32 StartX = (int)A.X;
-    r32 EndX   = (int)A.X;
+    v3 AB = B - A; // B - A
+    v3 AC = C - A; // C - A
+    AB *= (1.0f / Length(AB));
+    AC *= (1.0f / Length(AC));
+    v3 Normal = Cross(AB, AC);
+    Normal *= (1.0f / Length(Normal));
 
-    for(int Y = A.Y; Y <= (int)C.Y; Y++)
-    {
-        DrawLine(V2(StartX, Y), V2(EndX, Y), Color);
-        StartX += Slope1;
-        EndX   += Slope2;
-    }
+    return Normal;
 }
 
-static void FillFlatTopTriangle(v2 A, v2 B, v2 C, u32 Color) // A(x0, y0), B(x1, y1), C(x2, y2)
+static void
+DrawTrianglePixel(i32 X, i32 Y, 
+                  v4 A, v4 B, v4 C, 
+                  u32 Color)
 {
-    r32 Slope1 = (r32)((int)C.X - (int)A.X) / ((int)C.Y - (int)A.Y);
-    r32 Slope2 = (r32)((int)C.X - (int)B.X) / ((int)C.Y - (int)B.Y);
+    v2 P = V2(X, Y);
 
-    r32 StartX = (int)C.X;
-    r32 EndX   = (int)C.X;
+    v3 Bary = GetBarycentricWeights(A.XY, B.XY, C.XY, P);
 
-    for(int Y = C.Y; Y >= (int)A.Y; Y--)
+    r32 ReciprocalW = (1.0f / A.W) * Bary.X + (1.0f / B.W) * Bary.Y + (1.0f / C.W) * Bary.Z;
+    ReciprocalW = 1.0f - ReciprocalW;
+
+    if (ReciprocalW < GetZBufferValue(X, Y))
     {
-        DrawLine(V2(StartX, Y), V2(EndX, Y), Color);
-        StartX -= Slope1;
-        EndX   -= Slope2;
+        DrawPixel(X, Y, Color);
+        PutZBufferPixel(X, Y, ReciprocalW);
     }
 }
 
 void DrawFilledTriangle(triangle_t Triangle, u32 Color)
 {
-    v2 A = Triangle.points[0];
-    v2 B = Triangle.points[1];
-    v2 C = Triangle.points[2];
+    v4 A = Triangle.points[0];
+    v4 B = Triangle.points[1];
+    v4 C = Triangle.points[2];
 
-    if(A.Y > B.Y) SwapVectors(&A, &B);
-    if(B.Y > C.Y) SwapVectors(&B, &C);
-    if(A.Y > B.Y) SwapVectors(&A, &B);
+    if(A.Y > B.Y) SwapTwo_v4(&A, &B);
+    if(B.Y > C.Y) SwapTwo_v4(&B, &C);
+    if(A.Y > B.Y) SwapTwo_v4(&A, &B);
 
-    if(B.Y == C.Y) FillFlatBottomTriangle(A, B, C, Color);
-    else if(A.Y == B.Y) FillFlatTopTriangle(A, B, C, Color);
-    else 
+    int Ax = A.X;
+    int Ay = A.Y;
+    int Bx = B.X;
+    int By = B.Y;
+    int Cx = C.X;
+    int Cy = C.Y;
+
+    r32 InvSlope1 = 0;
+    r32 InvSlope2 = 0;
+    
+    if((By - Ay) != 0) InvSlope1 = (r32)(Bx - Ax) / AbsoluteValue(By - Ay);
+    if((Cy - Ay) != 0) InvSlope2 = (r32)(Cx - Ax) / AbsoluteValue(Cy - Ay);
+
+    if((By - Ay) != 0)
     {
-        v2 M = FindTriangleMid(A, B, C);
+        for(i32 Y = Ay; Y <= By; ++Y)
+        {
+            i32 StartX = Bx + InvSlope1*(Y - By);
+            i32 EndX   = Ax + InvSlope2*(Y - Ay);
 
-        // Flat-bottom triangle
-        FillFlatBottomTriangle(A, B, M, Color);
+            if(EndX < StartX)
+            {
+                i32 Temp = StartX;
+                StartX = EndX;
+                EndX = Temp;
+            }
 
-        // Flat-top triangle
-        FillFlatTopTriangle(B, M, C, Color);
+            for(i32 X = StartX; X <= EndX; ++X)
+            {
+                DrawTrianglePixel(X, Y, A, B, C, Color);
+            }
+        }
+    }
+
+    InvSlope1 = 0;
+    InvSlope2 = 0;
+
+    if((Cy - By) != 0) InvSlope1 = (r32)(Cx - Bx) / AbsoluteValue(Cy - By);
+    if((Cy - Ay) != 0) InvSlope2 = (r32)(Cx - Ax) / AbsoluteValue(Cy - Ay);
+
+    if((Cy - By) != 0)
+    {
+        for(i32 Y = By; Y <= Cy; ++Y)
+        {
+            i32 StartX = Bx + InvSlope1*(Y - By);
+            i32 EndX   = Ax + InvSlope2*(Y - Ay);
+
+            if(EndX < StartX)
+            {
+                i32 Temp = StartX;
+                StartX = EndX;
+                EndX = Temp;
+            }
+
+            for(i32 X = StartX; X <= EndX; ++X)
+            {
+                DrawTrianglePixel(X, Y, A, B, C, Color);
+            }
+        }
+    }
+}
+
+static void
+DrawTexel(i32 X, i32 Y, v4 A, v4 B, v4 C, 
+          tex2d AUVs, tex2d BUVs, tex2d CUVs, 
+          upng_t* Texture)
+{
+    v2 P = V2(X, Y);
+    v3 Bary = GetBarycentricWeights(A.XY, B.XY, C.XY, P); // NOTE: Alpha, Beta, Gamma
+
+    v3 TextCoords = {Bary.X*AUVs.u/A.W + Bary.Y*BUVs.u/B.W + Bary.Z*CUVs.u/C.W, // NOTE: Interpolated U
+                     Bary.X*AUVs.v/A.W + Bary.Y*BUVs.v/B.W + Bary.Z*CUVs.v/C.W, // NOTE: Interpolated V
+                     Bary.X*(1/A.W) + Bary.Y*(1/B.W) + Bary.Z*(1/C.W)}; // NOTE: Interpolated Reciprocal W
+
+    if(TextCoords.Z != 0)
+    {
+        TextCoords.X /= TextCoords.Z;
+        TextCoords.Y /= TextCoords.Z;
+    }
+    
+    i32 TextX = (i32)AbsoluteValue((i32)(TextCoords.X * Texture->width))  % Texture->width;
+    i32 TextY = (i32)AbsoluteValue((i32)(TextCoords.Y * Texture->height)) % Texture->height;
+
+    TextCoords.Z = 1.0f - TextCoords.Z;
+
+    if (TextCoords.Z < GetZBufferValue(X, Y))
+    {
+        u32* TextureBuffer = (u32*)upng_get_buffer(Texture);
+        DrawPixel(X, Y, TextureBuffer[TextY * Texture->width + TextX]);
+        PutZBufferPixel(X, Y, TextCoords.Z);
+    }
+}
+
+void 
+DrawTexturedTriangle(triangle_t Triangle, upng_t* Texture)
+{
+    v4 A = Triangle.points[0];
+    v4 B = Triangle.points[1];
+    v4 C = Triangle.points[2];
+
+    tex2d AUVs = Triangle.TextureCoords[0];
+    tex2d BUVs = Triangle.TextureCoords[1];
+    tex2d CUVs = Triangle.TextureCoords[2];
+
+    if(A.Y > B.Y) {SwapTwo_v4(&A, &B);SwapTwo_tex2d(&AUVs, &BUVs);}
+    if(B.Y > C.Y) {SwapTwo_v4(&B, &C);SwapTwo_tex2d(&BUVs, &CUVs);}
+    if(A.Y > B.Y) {SwapTwo_v4(&A, &B);SwapTwo_tex2d(&AUVs, &BUVs);}
+
+    AUVs.v = 1 - AUVs.v;
+    BUVs.v = 1 - BUVs.v;
+    CUVs.v = 1 - CUVs.v;
+
+    int Ax = A.X;
+    int Ay = A.Y;
+    int Bx = B.X;
+    int By = B.Y;
+    int Cx = C.X;
+    int Cy = C.Y;
+
+    r32 InvSlope1 = 0;
+    r32 InvSlope2 = 0;
+
+    if((By - Ay) != 0) InvSlope1 = (r32)(Bx - Ax) / AbsoluteValue(By - Ay);
+    if((Cy - Ay) != 0) InvSlope2 = (r32)(Cx - Ax) / AbsoluteValue(Cy - Ay);
+
+    if((By - Ay) != 0)
+    {
+        for(i32 Y = Ay; Y <= By; ++Y)
+        {
+            i32 StartX = Bx + InvSlope1*(Y - By);
+            i32 EndX   = Ax + InvSlope2*(Y - Ay);
+
+            if(EndX < StartX)
+            {
+                i32 Temp = StartX;
+                StartX = EndX;
+                EndX = Temp;
+            }
+
+            for(i32 X = StartX; X < EndX; X++)
+            {
+                DrawTexel(X, Y, A, B, C, AUVs, BUVs, CUVs, Texture);
+            }
+        }
+    }
+
+    InvSlope1 = 0;
+    InvSlope2 = 0;
+
+    if((Cy - By) != 0) InvSlope1 = (r32)(Cx - Bx) / AbsoluteValue(Cy - By);
+    if((Cy - Ay) != 0) InvSlope2 = (r32)(Cx - Ax) / AbsoluteValue(Cy - Ay);
+
+    if((Cy - By) != 0)
+    {
+        for(i32 Y = By; Y <= Cy; ++Y)
+        {
+            i32 StartX = Bx + InvSlope1*(Y - By);
+            i32 EndX   = Ax + InvSlope2*(Y - Ay);
+
+            if(EndX < StartX)
+            {
+                i32 Temp = StartX;
+                StartX = EndX;
+                EndX = Temp;
+            }
+
+            for(i32 X = StartX; X < EndX; X++)
+            {
+                DrawTexel(X, Y, A, B, C, AUVs, BUVs, CUVs, Texture);
+            }
+        }
     }
 }
 
@@ -84,96 +251,102 @@ mm_abs_ps(__m128 Val)
     return Result;
 }
 
-// TODO: Correct not filled lines inside
+// TODO: Needed further optimisations
+// TODO: This routine have to use 4x block to work better
 void DrawFilledTriangleFast(triangle_t Triangle, uint32_t Color)
 {
-    __m128 WindowWidth  = _mm_set1_ps(window_width);
-    __m128 WindowHeight = _mm_set1_ps(window_height);
-    __m128 Zero = _mm_set1_ps(0.0f);
-    __m128 One  = _mm_set1_ps(1.0f);
+    __m128i WindowWidth  = _mm_set1_epi32(GetWindowWidth());
+    __m128i WindowHeight = _mm_set1_epi32(GetWindowHeight());
+    __m128i Zero = _mm_set1_epi32(0.0f);
+    __m128i One  = _mm_set1_epi32(1.0f);
+    __m128 Half = _mm_set1_ps(0.5f);
 
-    __m128 Ax  = _mm_set1_ps(Triangle.points[0].X);
-    __m128 Ay  = _mm_set1_ps(Triangle.points[0].Y);
-    __m128 Bx  = _mm_set1_ps(Triangle.points[1].X);
-    __m128 By  = _mm_set1_ps(Triangle.points[1].Y);
-    __m128 Cx  = _mm_set1_ps(Triangle.points[2].X);
-    __m128 Cy  = _mm_set1_ps(Triangle.points[2].Y);
+    __m128i Ax  = _mm_set1_epi32(Triangle.points[0].X);
+    __m128i Ay  = _mm_set1_epi32(Triangle.points[0].Y);
+    __m128i Bx  = _mm_set1_epi32(Triangle.points[1].X);
+    __m128i By  = _mm_set1_epi32(Triangle.points[1].Y);
+    __m128i Cx  = _mm_set1_epi32(Triangle.points[2].X);
+    __m128i Cy  = _mm_set1_epi32(Triangle.points[2].Y);
 
-    __m128 cmp0 = _mm_cmpgt_ps(Ay, By);
-    if(((float*)&_mm_and_ps(cmp0, One))[0])
+    __m128i cmp0 = _mm_cmpgt_epi32(Ay, By);
+    if(_mm_movemask_epi8(cmp0))
     {
-        Ax = _mm_xor_ps(Ax, Bx);
-        Bx = _mm_xor_ps(Bx, Ax);
-        Ax = _mm_xor_ps(Ax, Bx);
+        Ax = _mm_xor_si128(Ax, Bx);
+        Bx = _mm_xor_si128(Bx, Ax);
+        Ax = _mm_xor_si128(Ax, Bx);
 
-        Ay = _mm_xor_ps(Ay, By);
-        By = _mm_xor_ps(By, Ay);
-        Ay = _mm_xor_ps(Ay, By);
+        Ay = _mm_xor_si128(Ay, By);
+        By = _mm_xor_si128(By, Ay);
+        Ay = _mm_xor_si128(Ay, By);
     } // SwapVectors(&A, &B);
-    __m128 cmp1 = _mm_cmpgt_ps(By, Cy);
-    if(((float*)&_mm_and_ps(cmp1, One))[0])
+    __m128i cmp1 = _mm_cmpgt_epi32(By, Cy);
+    if(_mm_movemask_epi8(cmp1))
     {
-        Bx = _mm_xor_ps(Bx, Cx);
-        Cx = _mm_xor_ps(Cx, Bx);
-        Bx = _mm_xor_ps(Bx, Cx);
-                          
-        By = _mm_xor_ps(By, Cy);
-        Cy = _mm_xor_ps(Cy, By);
-        By = _mm_xor_ps(By, Cy);
+        Bx = _mm_xor_si128(Bx, Cx);
+        Cx = _mm_xor_si128(Cx, Bx);
+        Bx = _mm_xor_si128(Bx, Cx);
+                             
+        By = _mm_xor_si128(By, Cy);
+        Cy = _mm_xor_si128(Cy, By);
+        By = _mm_xor_si128(By, Cy);
     } // SwapVectors(&B, &C);
-    cmp0 = _mm_cmpgt_ps(Ay, By);
-    if(((float*)&_mm_and_ps(cmp0, One))[0])
+    cmp0 = _mm_cmpgt_epi32(Ay, By);
+    if(_mm_movemask_epi8(cmp0))
     {
-        Ax = _mm_xor_ps(Ax, Bx);
-        Bx = _mm_xor_ps(Bx, Ax);
-        Ax = _mm_xor_ps(Ax, Bx);
-                          
-        Ay = _mm_xor_ps(Ay, By);
-        By = _mm_xor_ps(By, Ay);
-        Ay = _mm_xor_ps(Ay, By);
+        Ax = _mm_xor_si128(Ax, Bx);
+        Bx = _mm_xor_si128(Bx, Ax);
+        Ax = _mm_xor_si128(Ax, Bx);
+                             
+        Ay = _mm_xor_si128(Ay, By);
+        By = _mm_xor_si128(By, Ay);
+        Ay = _mm_xor_si128(Ay, By);
     } // SwapVectors(&A, &B);
 
-    cmp0 = _mm_and_ps(_mm_cmpeq_ps(Ay, By), One);
-    cmp1 = _mm_and_ps(_mm_cmpeq_ps(By, Cy), One);
-    if(((float*)&cmp1)[0]) 
+    cmp0 = _mm_cmpeq_epi32(Ay, By);
+    cmp1 = _mm_cmpeq_epi32(By, Cy);
+    if(_mm_movemask_epi8(cmp1)) 
     {
-        __m128 Slope1 = _mm_div_ps(_mm_sub_ps(Bx, Ax), _mm_sub_ps(By, Ay));
-        __m128 Slope2 = _mm_div_ps(_mm_sub_ps(Cx, Ax), _mm_sub_ps(Cy, Ay));
+#if 1
+        __m128 Slope1 = _mm_div_ps(_mm_cvtepi32_ps(_mm_sub_epi32(Bx, Ax)), _mm_cvtepi32_ps(_mm_sub_epi32(By, Ay)));
+        __m128 Slope2 = _mm_div_ps(_mm_cvtepi32_ps(_mm_sub_epi32(Cx, Ax)), _mm_cvtepi32_ps(_mm_sub_epi32(Cy, Ay)));
 
-        __m128 StartX = Ax;
-        __m128 EndX   = Ax;
+        __m128 StartX = _mm_cvtepi32_ps(Ax);
+        __m128 EndX   = _mm_cvtepi32_ps(Ax);
 
-        for(float Y = ((float*)&Ay)[0]; Y < ((float*)&Cy)[0]; ++Y)
+        for(i32 Y = ((i32*)&Ay)[0]; Y <= ((i32*)&Cy)[0]; Y++)
         {
-            __m128 MinX = StartX;
-            __m128 MinY = _mm_set1_ps((float)Y);
-            __m128 MaxX = EndX;
-            __m128 MaxY = _mm_set1_ps((float)Y);
+            __m128i MinX = _mm_cvtps_epi32(StartX);
+            __m128i MinY = _mm_set1_epi32(Y);
+            __m128i MaxX = _mm_cvtps_epi32(EndX);
+            __m128i MaxY = _mm_set1_epi32(Y);
 
-            __m128 dX = _mm_sub_ps(MaxX, MinX);
-            __m128 dY = _mm_sub_ps(MaxY, MinY); 
+            __m128i dX = _mm_sub_epi32(MaxX, MinX);
+            __m128i dY = _mm_sub_epi32(MaxY, MinY); 
 
-            __m128 SideLength = _mm_max_ps(mm_abs_ps(dX), mm_abs_ps(dY));
+            __m128i SideLength = _mm_cvtps_epi32(_mm_max_ps(mm_abs_ps(_mm_cvtepi32_ps(dX)), 
+                                                            mm_abs_ps(_mm_cvtepi32_ps(dY))));
 
-            __m128 IncX = _mm_div_ps(dX, SideLength);
-            __m128 IncY = _mm_div_ps(dY, SideLength);
+            __m128 IncX = _mm_setzero_ps();
+            __m128 IncY = _mm_setzero_ps();
 
-            __m128 CurrentX = MinX;
-            __m128 CurrentY = MinY;
-
-            for(uint32_t PointIdx = 0; PointIdx < ((float*)&SideLength)[0]; ++PointIdx)
+            __m128 cmpeq0 = _mm_and_ps(_mm_cmpneq_ps(_mm_cvtepi32_ps(dX), _mm_cvtepi32_ps(Zero)), _mm_cmpneq_ps(_mm_cvtepi32_ps(SideLength), _mm_cvtepi32_ps(Zero)));
+            __m128 cmpeq1 = _mm_and_ps(_mm_cmpneq_ps(_mm_cvtepi32_ps(dY), _mm_cvtepi32_ps(Zero)), _mm_cmpneq_ps(_mm_cvtepi32_ps(SideLength), _mm_cvtepi32_ps(Zero)));
+            if(_mm_movemask_ps(cmpeq0))
             {
-                __m128 cmp0 = _mm_and_ps(_mm_cmpge_ps(CurrentX, Zero), _mm_cmplt_ps(CurrentX, WindowWidth));
-                __m128 cmp1 = _mm_and_ps(_mm_cmpge_ps(CurrentY, Zero), _mm_cmplt_ps(CurrentY, WindowHeight));
-                cmp0 = _mm_and_ps(cmp0, One);
-                cmp1 = _mm_and_ps(cmp1, One);
-                if (((float*)&cmp0)[0])
-                {
-                    if (((float*)&cmp1)[0])
-                    {
-                        color_buffer[window_width * (uint32_t)((float*)&CurrentY)[0] + (uint32_t)((float*)&CurrentX)[0]] = Color;
-                    }
-                }
+                IncX = _mm_div_ps(_mm_cvtepi32_ps(dX), _mm_cvtepi32_ps(SideLength));
+            }
+            if(_mm_movemask_ps(cmpeq1))
+            {
+                IncY = _mm_div_ps(_mm_cvtepi32_ps(dY), _mm_cvtepi32_ps(SideLength));
+            }
+
+            __m128 CurrentX = _mm_cvtepi32_ps(MinX);
+            __m128 CurrentY = _mm_cvtepi32_ps(MinY);
+
+            // DrawPixel(V2(StartX, Y), V2(EndX, Y), Color)
+            for(i32 PointIdx = 0; PointIdx <= ((i32*)&SideLength)[0]; PointIdx++)
+            {
+                DrawPixelFast(CurrentX, CurrentY, Color);
 
                 CurrentX = _mm_add_ps(CurrentX, IncX);
                 CurrentY = _mm_add_ps(CurrentY, IncY);
@@ -182,102 +355,115 @@ void DrawFilledTriangleFast(triangle_t Triangle, uint32_t Color)
             StartX = _mm_add_ps(StartX, Slope1);
             EndX   = _mm_add_ps(EndX,   Slope2);
         }
+#endif
     } // FillFlatBottomTriangle(A, B, C, Color);
-    else if(((float*)&cmp0)[0])
+    else if(_mm_movemask_epi8(cmp0))
     {
-        __m128 Slope1 = _mm_div_ps(_mm_sub_ps(Cx, Ax), _mm_sub_ps(Cy, Ay));
-        __m128 Slope2 = _mm_div_ps(_mm_sub_ps(Cx, Bx), _mm_sub_ps(Cy, By));
+        __m128 Slope1 = _mm_div_ps(_mm_cvtepi32_ps(_mm_sub_epi32(Cx, Ax)), _mm_cvtepi32_ps(_mm_sub_epi32(Cy, Ay)));
+        __m128 Slope2 = _mm_div_ps(_mm_cvtepi32_ps(_mm_sub_epi32(Cx, Bx)), _mm_cvtepi32_ps(_mm_sub_epi32(Cy, By)));
 
-        __m128 StartX = Cx;
-        __m128 EndX   = Cx;
+        __m128 StartX = _mm_cvtepi32_ps(Cx);
+        __m128 EndX   = _mm_cvtepi32_ps(Cx);
 
-        for(float Y = ((float*)&Cy)[0]; Y > ((float*)&Ay)[0]; --Y)
+        for(i32 Y = ((i32*)&Cy)[0]; Y >= ((i32*)&Ay)[0]; --Y)
         {
-            __m128 MinX = StartX;
-            __m128 MinY = _mm_set1_ps((float)Y);
-            __m128 MaxX = EndX;
-            __m128 MaxY = _mm_set1_ps((float)Y);
+            __m128i MinX = _mm_cvtps_epi32(StartX);
+            __m128i MinY = _mm_set1_epi32(Y);
+            __m128i MaxX = _mm_cvtps_epi32(EndX);
+            __m128i MaxY = _mm_set1_epi32(Y);
 
-            __m128 dX = _mm_sub_ps(MaxX, MinX);
-            __m128 dY = _mm_sub_ps(MaxY, MinY); 
+            __m128i dX = _mm_sub_epi32(MaxX, MinX);
+            __m128i dY = _mm_sub_epi32(MaxY, MinY); 
 
-            __m128 SideLength = _mm_max_ps(mm_abs_ps(dX), mm_abs_ps(dY));
+            __m128i SideLength = _mm_cvtps_epi32(_mm_max_ps(mm_abs_ps(_mm_cvtepi32_ps(dX)), 
+                                                            mm_abs_ps(_mm_cvtepi32_ps(dY))));
 
-            __m128 IncX = _mm_div_ps(dX, SideLength);
-            __m128 IncY = _mm_div_ps(dY, SideLength);
+            __m128 IncX = _mm_setzero_ps();
+            __m128 IncY = _mm_setzero_ps();
 
-            __m128 CurrentX = MinX;
-            __m128 CurrentY = MinY;
-
-            for(uint32_t PointIdx = 0; PointIdx < ((float*)&SideLength)[0]; ++PointIdx)
+            __m128 cmpeq0 = _mm_and_ps(_mm_cmpneq_ps(_mm_cvtepi32_ps(dX), _mm_cvtepi32_ps(Zero)), _mm_cmpneq_ps(_mm_cvtepi32_ps(SideLength), _mm_cvtepi32_ps(Zero)));
+            __m128 cmpeq1 = _mm_and_ps(_mm_cmpneq_ps(_mm_cvtepi32_ps(dY), _mm_cvtepi32_ps(Zero)), _mm_cmpneq_ps(_mm_cvtepi32_ps(SideLength), _mm_cvtepi32_ps(Zero)));
+            if(_mm_movemask_ps(cmpeq0))
             {
-                __m128 cmp0 = _mm_and_ps(_mm_cmpge_ps(CurrentX, Zero), _mm_cmplt_ps(CurrentX, WindowWidth));
-                __m128 cmp1 = _mm_and_ps(_mm_cmpge_ps(CurrentY, Zero), _mm_cmplt_ps(CurrentY, WindowHeight));
-                cmp0 = _mm_and_ps(cmp0, One);
-                cmp1 = _mm_and_ps(cmp1, One);
-                if (((float*)&cmp0)[0])
-                {
-                    if (((float*)&cmp1)[0])
-                    {
-                        color_buffer[window_width * (uint32_t)((float*)&CurrentY)[0] + (uint32_t)((float*)&CurrentX)[0]] = Color;
-                    }
-                }
+                IncX = _mm_div_ps(_mm_cvtepi32_ps(dX), _mm_cvtepi32_ps(SideLength));
+            }
+            if(_mm_movemask_ps(cmpeq1))
+            {
+                IncY = _mm_div_ps(_mm_cvtepi32_ps(dY), _mm_cvtepi32_ps(SideLength));
+            }
+
+            __m128 CurrentX = _mm_cvtepi32_ps(MinX);
+            __m128 CurrentY = _mm_cvtepi32_ps(MinY);
+
+            for(i32 PointIdx = 0; PointIdx <= ((i32*)&SideLength)[0]; PointIdx++)
+            {
+                DrawPixelFast(CurrentX, CurrentY, Color);
 
                 CurrentX = _mm_add_ps(CurrentX, IncX);
                 CurrentY = _mm_add_ps(CurrentY, IncY);
             }
 
             StartX = _mm_sub_ps(StartX, Slope1);
-            EndX   = _mm_sub_ps(EndX, Slope2);
+            EndX   = _mm_sub_ps(EndX,   Slope2);
         }
     } // FillFlatTopTriangle(A, B, C, Color);
     else 
     {
+        __m128 Adx = _mm_cvtepi32_ps(Ax);
+        __m128 Ady = _mm_cvtepi32_ps(Ay);
+        __m128 Bdx = _mm_cvtepi32_ps(Bx);
+        __m128 Bdy = _mm_cvtepi32_ps(By);
+        __m128 Cdx = _mm_cvtepi32_ps(Cx);
+        __m128 Cdy = _mm_cvtepi32_ps(Cy);
+
         // Find Triangle Mid Point
         //v2 M = FindTriangleMid(A, B, C);
-        __m128 My = By;
-        __m128 Mx = _mm_add_ps(Ax, _mm_div_ps(_mm_mul_ps(_mm_sub_ps(By, Ay), _mm_sub_ps(Cx, Ax)), _mm_sub_ps(Cy, Ay)));
+        __m128i My = By;
+        __m128i Temp0 = _mm_cvtps_epi32(_mm_div_ps(_mm_mul_ps(_mm_sub_ps(Bdy, Ady), _mm_sub_ps(Cdx, Adx)), _mm_sub_ps(Cdy, Ady)));
+        __m128i Mx = _mm_add_epi32(Ax, Temp0);
 
-#if 1
         // Flat-bottom triangle
-        // A = A, B = M, C = B
-        __m128 Slope1 = _mm_div_ps(_mm_sub_ps(Bx, Ax), _mm_sub_ps(By, Ay));
-        __m128 Slope2 = _mm_div_ps(_mm_sub_ps(Mx, Ax), _mm_sub_ps(My, Ay));
+        // A = A, B = B, C = M
+        __m128 Slope1 = _mm_div_ps(_mm_cvtepi32_ps(_mm_sub_epi32(Bx, Ax)), _mm_cvtepi32_ps(_mm_sub_epi32(By, Ay)));
+        __m128 Slope2 = _mm_div_ps(_mm_cvtepi32_ps(_mm_sub_epi32(Mx, Ax)), _mm_cvtepi32_ps(_mm_sub_epi32(My, Ay)));
 
-        __m128 StartX = Ax;
-        __m128 EndX   = Ax;
+        __m128 StartX = _mm_cvtepi32_ps(Ax);
+        __m128 EndX   = _mm_cvtepi32_ps(Ax);
 
-        for(float Y = ((float*)&Ay)[0]; Y < ((float*)&My)[0]; ++Y)
+        for(i32 Y = ((i32*)&Ay)[0]; Y <= ((i32*)&My)[0]; Y++)
         {
-            __m128 MinX = StartX;
-            __m128 MinY = _mm_set1_ps((float)Y);
-            __m128 MaxX = EndX;
-            __m128 MaxY = _mm_set1_ps((float)Y);
+            __m128i MinX = _mm_cvtps_epi32(StartX);
+            __m128i MinY = _mm_set1_epi32(Y);
+            __m128i MaxX = _mm_cvtps_epi32(EndX);
+            __m128i MaxY = _mm_set1_epi32(Y);
 
-            __m128 dX = _mm_sub_ps(MaxX, MinX);
-            __m128 dY = _mm_sub_ps(MaxY, MinY); 
+            __m128i dX = _mm_sub_epi32(MaxX, MinX);
+            __m128i dY = _mm_sub_epi32(MaxY, MinY); 
 
-            __m128 SideLength = _mm_max_ps(mm_abs_ps(dX), mm_abs_ps(dY));
+            __m128i SideLength = _mm_cvtps_epi32(_mm_max_ps(mm_abs_ps(_mm_cvtepi32_ps(dX)), 
+                                                            mm_abs_ps(_mm_cvtepi32_ps(dY))));
 
-            __m128 IncX = _mm_div_ps(dX, SideLength);
-            __m128 IncY = _mm_div_ps(dY, SideLength);
+            __m128 IncX = _mm_setzero_ps();
+            __m128 IncY = _mm_setzero_ps();
 
-            __m128 CurrentX = MinX;
-            __m128 CurrentY = MinY;
-
-            for(uint32_t PointIdx = 0; PointIdx < ((float*)&SideLength)[0]; ++PointIdx)
+            __m128 cmpeq0 = _mm_and_ps(_mm_cmpneq_ps(_mm_cvtepi32_ps(dX), _mm_cvtepi32_ps(Zero)), _mm_cmpneq_ps(_mm_cvtepi32_ps(SideLength), _mm_cvtepi32_ps(Zero)));
+            __m128 cmpeq1 = _mm_and_ps(_mm_cmpneq_ps(_mm_cvtepi32_ps(dY), _mm_cvtepi32_ps(Zero)), _mm_cmpneq_ps(_mm_cvtepi32_ps(SideLength), _mm_cvtepi32_ps(Zero)));
+            if(_mm_movemask_ps(cmpeq0))
             {
-                __m128 cmp0 = _mm_and_ps(_mm_cmpge_ps(CurrentX, Zero), _mm_cmplt_ps(CurrentX, WindowWidth));
-                __m128 cmp1 = _mm_and_ps(_mm_cmpge_ps(CurrentY, Zero), _mm_cmplt_ps(CurrentY, WindowHeight));
-                cmp0 = _mm_and_ps(cmp0, One);
-                cmp1 = _mm_and_ps(cmp1, One);
-                if (((float*)&cmp0)[0])
-                {
-                    if (((float*)&cmp1)[0])
-                    {
-                        color_buffer[window_width * (uint32_t)((float*)&CurrentY)[0] + (uint32_t)((float*)&CurrentX)[0]] = Color;
-                    }
-                }
+                IncX = _mm_div_ps(_mm_cvtepi32_ps(dX), _mm_cvtepi32_ps(SideLength));
+            }
+            if(_mm_movemask_ps(cmpeq1))
+            {
+                IncY = _mm_div_ps(_mm_cvtepi32_ps(dY), _mm_cvtepi32_ps(SideLength));
+            }
+
+            __m128 CurrentX = _mm_cvtepi32_ps(MinX);
+            __m128 CurrentY = _mm_cvtepi32_ps(MinY);
+
+            // DrawPixel(V2(StartX, Y), V2(EndX, Y), Color)
+            for(i32 PointIdx = 0; PointIdx <= ((i32*)&SideLength)[0]; PointIdx++)
+            {
+                DrawPixelFast(CurrentX, CurrentY, Color);
 
                 CurrentX = _mm_add_ps(CurrentX, IncX);
                 CurrentY = _mm_add_ps(CurrentY, IncY);
@@ -289,43 +475,45 @@ void DrawFilledTriangleFast(triangle_t Triangle, uint32_t Color)
 
         // Flat-top triangle
         // A = B, B = M, C = C
-        Slope1 = _mm_div_ps(_mm_sub_ps(Cx, Bx), _mm_sub_ps(Cy, By));
-        Slope2 = _mm_div_ps(_mm_sub_ps(Cx, Mx), _mm_sub_ps(Cy, My));
+        Slope1 = _mm_div_ps(_mm_cvtepi32_ps(_mm_sub_epi32(Cx, Bx)), _mm_cvtepi32_ps(_mm_sub_epi32(Cy, By)));
+        Slope2 = _mm_div_ps(_mm_cvtepi32_ps(_mm_sub_epi32(Cx, Mx)), _mm_cvtepi32_ps(_mm_sub_epi32(Cy, My)));
 
-        StartX = Cx;
-        EndX   = Cx;
+        StartX = _mm_cvtepi32_ps(Cx);
+        EndX   = _mm_cvtepi32_ps(Cx);
 
-        for(float Y = ((float*)&Cy)[0]; Y > ((float*)&By)[0]; --Y)
+        for(i32 Y = ((i32*)&Cy)[0]; Y >= ((i32*)&By)[0]; --Y)
         {
-            __m128 MinX = StartX;
-            __m128 MinY = _mm_set1_ps((float)Y);
-            __m128 MaxX = EndX;
-            __m128 MaxY = _mm_set1_ps((float)Y);
+            __m128i MinX = _mm_cvtps_epi32(StartX);
+            __m128i MinY = _mm_set1_epi32(Y);
+            __m128i MaxX = _mm_cvtps_epi32(EndX);
+            __m128i MaxY = _mm_set1_epi32(Y);
 
-            __m128 dX = _mm_sub_ps(MaxX, MinX);
-            __m128 dY = _mm_sub_ps(MaxY, MinY); 
+            __m128i dX = _mm_sub_epi32(MaxX, MinX);
+            __m128i dY = _mm_sub_epi32(MaxY, MinY); 
 
-            __m128 SideLength = _mm_max_ps(mm_abs_ps(dX), mm_abs_ps(dY));
+            __m128i SideLength = _mm_cvtps_epi32(_mm_max_ps(mm_abs_ps(_mm_cvtepi32_ps(dX)), 
+                                                            mm_abs_ps(_mm_cvtepi32_ps(dY))));
 
-            __m128 IncX = _mm_div_ps(dX, SideLength);
-            __m128 IncY = _mm_div_ps(dY, SideLength);
+            __m128 IncX = _mm_setzero_ps();
+            __m128 IncY = _mm_setzero_ps();
 
-            __m128 CurrentX = MinX;
-            __m128 CurrentY = MinY;
-
-            for(uint32_t PointIdx = 0; PointIdx < ((float*)&SideLength)[0]; ++PointIdx)
+            __m128 cmpeq0 = _mm_and_ps(_mm_cmpneq_ps(_mm_cvtepi32_ps(dX), _mm_cvtepi32_ps(Zero)), _mm_cmpneq_ps(_mm_cvtepi32_ps(SideLength), _mm_cvtepi32_ps(Zero)));
+            __m128 cmpeq1 = _mm_and_ps(_mm_cmpneq_ps(_mm_cvtepi32_ps(dY), _mm_cvtepi32_ps(Zero)), _mm_cmpneq_ps(_mm_cvtepi32_ps(SideLength), _mm_cvtepi32_ps(Zero)));
+            if(_mm_movemask_ps(cmpeq0))
             {
-                __m128 cmp0 = _mm_and_ps(_mm_cmpge_ps(CurrentX, Zero), _mm_cmplt_ps(CurrentX, WindowWidth));
-                __m128 cmp1 = _mm_and_ps(_mm_cmpge_ps(CurrentY, Zero), _mm_cmplt_ps(CurrentY, WindowHeight));
-                cmp0 = _mm_and_ps(cmp0, One);
-                cmp1 = _mm_and_ps(cmp1, One);
-                if (((float*)&cmp0)[0])
-                {
-                    if (((float*)&cmp1)[0])
-                    {
-                        color_buffer[window_width * (uint32_t)((float*)&CurrentY)[0] + (uint32_t)((float*)&CurrentX)[0]] = Color;
-                    }
-                }
+                IncX = _mm_div_ps(_mm_cvtepi32_ps(dX), _mm_cvtepi32_ps(SideLength));
+            }
+            if(_mm_movemask_ps(cmpeq1))
+            {
+                IncY = _mm_div_ps(_mm_cvtepi32_ps(dY), _mm_cvtepi32_ps(SideLength));
+            }
+
+            __m128 CurrentX = _mm_cvtepi32_ps(MinX);
+            __m128 CurrentY = _mm_cvtepi32_ps(MinY);
+
+            for(i32 PointIdx = 0; PointIdx <= ((i32*)&SideLength)[0]; PointIdx++)
+            {
+                DrawPixelFast(CurrentX, CurrentY, Color);
 
                 CurrentX = _mm_add_ps(CurrentX, IncX);
                 CurrentY = _mm_add_ps(CurrentY, IncY);
@@ -334,7 +522,6 @@ void DrawFilledTriangleFast(triangle_t Triangle, uint32_t Color)
             StartX = _mm_sub_ps(StartX, Slope1);
             EndX   = _mm_sub_ps(EndX,   Slope2);
         }
-#endif
     }
 }
 

@@ -3,11 +3,15 @@
 #include <stdbool.h>
 #include <SDL2/SDL.h>
 
+#include "upng.c"
 #include "display.h"
+#include "texture.cpp"
 #include "mesh.cpp"
 #include "array.cpp"
 #include "triangle.cpp"
 #include "matrix.cpp"
+#include "Camera.cpp"
+#include "clipping.cpp"
 
 static u32 
 CreateColorN(v4 Color)
@@ -57,6 +61,7 @@ static u32
 ApplyLightIntensity(u32 Color, r32 Intensity)
 {
     Intensity = Clamp01(Intensity);
+
     u32 A = (Color & 0xFF000000);
     u32 R = (Color & 0x00FF0000) * Intensity;
     u32 G = (Color & 0x0000FF00) * Intensity; 
@@ -74,307 +79,146 @@ struct lighting
 
 bool is_running;
 
-triangle_t* TrianglesToRender = NULL;
-v3 CameraPos = {0, 0, 0};
+#define TRIANGLES_PER_MESH (1 << 13)
+triangle_t TrianglesToRender[TRIANGLES_PER_MESH];
+i32 TrianglesToRenderCount = 0;
 
+r32 DeltaTime = 0;
 i32 PreviousFrameTime = 0;
-u32 DisplayFlag = DisplayType_FilledTriangles | DisplayType_Lines | DisplayType_Culling;
+u32 DisplayFlag = DisplayType_Lines | DisplayType_Culling;
 
 lighting Light;
+m4x4 ViewMatrix;
 m4x4 ProjectionMatrix;
-
-//
-// Test Triangulation method
-//
-
-struct shape
-{
-    u32 VerticesCount;
-    v3* Vertices;
-
-    u32 TrianglesCount;
-    int* Triangles;
-};
-
-static bool IsPointInTriangle(v3 Point, v3 A, v3 B, v3 C)
-{
-    v3 AB = B - A;
-    v3 BC = C - B;
-    v3 CA = A - C;
-
-    v3 AP = Point - A;
-    v3 BP = Point - B;
-    v3 CP = Point - C;
-
-    float Cross1 = Cross(AB, AP).Z;
-    float Cross2 = Cross(BC, BP).Z;
-    float Cross3 = Cross(CA, CP).Z;
-
-    if((Cross1 > 0.0f) || (Cross2 > 0.0f) || (Cross3 > 0.0f))
-    {
-        return false;
-    }
-
-    return true;
-}
-
-int GetListElement(int* IndexList, int ListSize, int PolyIdx)
-{
-    int Result;
-
-    if(PolyIdx < 0)
-    {
-        Result = IndexList[PolyIdx % ListSize + ListSize];
-    }
-    else if(PolyIdx >= ListSize)
-    {
-        Result = IndexList[PolyIdx % ListSize];
-    }
-    else
-    {
-        Result = IndexList[PolyIdx];
-    }
-
-    return Result;
-}
-
-void RemoveElementFromList(int* IndexList, int* ListSize, int PolyIdx)
-{
-    for(int i = 0; i < *ListSize; ++i)
-    {
-        if(i >= PolyIdx)
-        {
-            IndexList[i] = IndexList[i + 1];
-        }
-    }
-    *ListSize -= 1;
-}
-
-static void PolygonTriangulate(shape* Shape)
-{
-    bool Result = false;
-
-    int  ListSize  = Shape->VerticesCount;
-    int* IndexList = (int*)malloc(sizeof(int) * ListSize);
-    for(int i = 0; i < ListSize; ++i)
-    {
-        IndexList[i] = i;
-    }
-
-    int TotalTriangleCount = Shape->VerticesCount - 2;
-    int TotalTriangleCountIdx = TotalTriangleCount*3;
-
-    int* TrianglesResult = (int*)malloc(sizeof(int)*TotalTriangleCountIdx);
-    int  TriangleIdx = 0;
-
-    while(ListSize > 3)
-    {
-        for(int PolyIdx = 0; PolyIdx < ListSize; ++PolyIdx)
-        {
-            int a = IndexList[PolyIdx];
-            int b = GetListElement(IndexList, ListSize, PolyIdx - 1);
-            int c = GetListElement(IndexList, ListSize, PolyIdx + 1);
-
-            v3 A = Shape->Vertices[a];
-            v3 B = Shape->Vertices[b];
-            v3 C = Shape->Vertices[c];
-
-            v3 AB = B - A;
-            v3 AC = C - A;
-            
-            if(Cross(AB, AC).Z < 0.0f)
-            {
-                continue;
-            }
-
-            bool IsEar = true;
-
-            for(int i = 0; i < ListSize; ++i)
-            {
-                if((a == i) || (b == i) || (c == i))
-                {
-                    continue;
-                }
-
-                v3 Point = Shape->Vertices[i];
-                
-                if(IsPointInTriangle(Point, B, A, C))
-                {
-                    IsEar = false;
-                    break;
-                }
-            }
-
-            if(IsEar)
-            {
-                TrianglesResult[TriangleIdx++] = b;
-                TrianglesResult[TriangleIdx++] = a;
-                TrianglesResult[TriangleIdx++] = c;
-
-                RemoveElementFromList(IndexList, &ListSize, PolyIdx);
-                break;
-            }
-        }
-    }
-
-    TrianglesResult[TriangleIdx++] = IndexList[0];
-    TrianglesResult[TriangleIdx++] = IndexList[1];
-    TrianglesResult[TriangleIdx++] = IndexList[2];
-
-    Shape->TrianglesCount = TriangleIdx;
-    Shape->Triangles = TrianglesResult;
-}
-//
-//
-//
+m4x4 WorldMatrix;
 
 static void 
 setup(void)
 {
-    Mesh.Vertices    = NULL;
-    Mesh.Meshes      = NULL;
-    Mesh.Rotation    = V3(0, 0, 0);
-    Mesh.Scale       = V3(1, 1, 1);
-    Mesh.Translation = V3(0, 0, 0);
-
-    color_buffer = (u32*)malloc(sizeof(u32)*window_width*window_height);
-
     Light.Direction = V3(0, 0, 1);
-    //Light.Direction = Light.Direction * (1.0f / Length(Light.Direction));
-    texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, 
-                                SDL_TEXTUREACCESS_STREAMING, 
-                                window_width, window_height);
 
-    r32 FOV = M_PI / 3.0f;
-    r32 AspectRatio = (r32)window_height / (r32)window_width;
-    r32 Near = 0.1;
-    r32 Far  = 100.0;
-    ProjectionMatrix = MakePerspectiveProjection(FOV, AspectRatio, Near, Far);
+    r32 AspectRatioY = (r32)GetWindowHeight() / (r32)GetWindowWidth();
+    r32 AspectRatioX = (r32)GetWindowWidth()  / (r32)GetWindowHeight();
+    r32 FOVy = M_PI / 3.0f;
+    r32 FOVx = atanf(tanf(FOVy / 2) * AspectRatioX) * 2;
+    r32 Near =  1.0f;
+    r32 Far  = 50.0f;
+    ProjectionMatrix = MakePerspectiveProjection(FOVy, AspectRatioY, Near, Far);
 
-    //LoadCubeMeshData();
-    LoadObjFileData("../data/f22.obj");
+    InitializeFrustrumPlanes(FOVx, FOVy, Near, Far);
+
+    LoadMesh("../data/runway.obj", "../data/runway.png", V3(1, 1, 1), V3(0, -3.5f, 23), V3(0, 0, 0));
+    LoadMesh("../data/f22.obj",  "../data/f22.png",  V3(1, 1, 1), V3( 6, -3.3f, -2), V3(0, -M_PI/2, 0));
+    LoadMesh("../data/f117.obj", "../data/f117.png", V3(1, 1, 1), V3(10, -3.3f,  0), V3(0, -M_PI/2, 0));
+    LoadMesh("../data/efa.obj", "../data/efa.png",   V3(1, 1, 1), V3( 6, -3.3f,  2), V3(0, -M_PI/2, 0));
 }
 
 static void 
 process_input(void)
 {
     SDL_Event event;
-    SDL_PollEvent(&event);
-
-    switch(event.type)
+    while(SDL_PollEvent(&event))
     {
-        case SDL_QUIT:
-            is_running = false;
-            break;
-        case SDL_KEYDOWN:
-            {
-                if(event.key.keysym.sym == SDLK_ESCAPE) is_running = false;
-                else if(event.key.keysym.sym == SDLK_1) DisplayFlag ^= DisplayType_Dots;
-                else if(event.key.keysym.sym == SDLK_2) DisplayFlag ^= DisplayType_Lines;
-                else if(event.key.keysym.sym == SDLK_3) DisplayFlag ^= DisplayType_FilledTriangles;
-                else if(event.key.keysym.sym == SDLK_4) DisplayFlag ^= (DisplayType_Lines | DisplayType_FilledTriangles);
-                else if(event.key.keysym.sym == SDLK_c) DisplayFlag |= DisplayType_Culling;
-                else if(event.key.keysym.sym == SDLK_d) DisplayFlag &= ~DisplayType_Culling;
-            }
-            break;
-    }
-}
-
-static void
-swap(triangle_t* Triangles, u32 left, u32 right)
-{
-    triangle_t temp = Triangles[left];
-    Triangles[left] = Triangles[right];
-    Triangles[right] = temp;
-}
-
-static void
-Sort(triangle_t* Triangles, u32 Size)
-{
-    if (Size == 0) return;
-    bool IsSorted = false;
-    u32 LastUnsorted = Size - 1;
-    while(!IsSorted)
-    {
-        IsSorted = true;
-        for(u32 Idx = 0; Idx < LastUnsorted; ++Idx)
+        switch(event.type)
         {
-            if(Triangles[Idx].AvgDepth < Triangles[Idx + 1].AvgDepth)
-            {
-                swap(Triangles, Idx, Idx + 1);
-                IsSorted = false;
-            }
+            case SDL_QUIT:
+                is_running = false;
+                break;
+            case SDL_KEYDOWN:
+                {
+                    if(event.key.keysym.sym == SDLK_ESCAPE) is_running = false;
+                    else if(event.key.keysym.sym == SDLK_1) DisplayFlag ^= DisplayType_Dots;
+                    else if(event.key.keysym.sym == SDLK_2) DisplayFlag ^= DisplayType_Lines;
+                    else if(event.key.keysym.sym == SDLK_3) DisplayFlag ^= DisplayType_FilledTriangles;
+                    else if(event.key.keysym.sym == SDLK_5) DisplayFlag ^= DisplayType_Textured;
+                    else if(event.key.keysym.sym == SDLK_4) DisplayFlag ^= (DisplayType_Lines | DisplayType_FilledTriangles);
+                    else if(event.key.keysym.sym == SDLK_c) DisplayFlag |= DisplayType_Culling;
+                    else if(event.key.keysym.sym == SDLK_x) DisplayFlag &= ~DisplayType_Culling;
+                    else if(event.key.keysym.sym == SDLK_w) Camera.Pitch += 3.0f * DeltaTime;
+                    else if(event.key.keysym.sym == SDLK_s) Camera.Pitch -= 3.0f * DeltaTime;
+                    else if(event.key.keysym.sym == SDLK_LEFT)  Camera.Yaw -= 1.0f * DeltaTime;
+                    else if(event.key.keysym.sym == SDLK_RIGHT) Camera.Yaw += 1.0f * DeltaTime;
+                    else if(event.key.keysym.sym == SDLK_UP)   
+                    {
+                        Camera.ForwardSpeed = Camera.Direction * (5.0f * DeltaTime); 
+                        Camera.Position += Camera.ForwardSpeed;
+                    }
+                    else if(event.key.keysym.sym == SDLK_DOWN) 
+                    {
+                        Camera.ForwardSpeed = Camera.Direction * (5.0f * DeltaTime); 
+                        Camera.Position -= Camera.ForwardSpeed;
+                    }
+                }
+                break;
         }
-        LastUnsorted--;
     }
 }
 
-static void 
-update(void)
+
+static void
+ProcessGraphicsPipeline(mesh_t* Mesh)
 {
-    int TimeToWait = FRAME_TARGET_TIME - (SDL_GetTicks() + PreviousFrameTime);
+    m4x4 ScaleMatrix = MakeScaleMatrix(Mesh->Scale.X, Mesh->Scale.Y, Mesh->Scale.Z);
+    m4x4 TranslationMatrix = Translate(GetIdentity(), Mesh->Translation);
+    m4x4 RotationX = RotateX(Mesh->Rotation.X);
+    m4x4 RotationY = RotateY(Mesh->Rotation.Y);
+    m4x4 RotationZ = RotateZ(Mesh->Rotation.Z);
 
-    TrianglesToRender = NULL;
+    v3 Target = V3(0, 0, 1);
 
-    if(TimeToWait > 0 && (TimeToWait <= FRAME_TARGET_TIME))
+    m4x4 CameraYawRotation   = RotateY(Camera.Yaw);
+    m4x4 CameraPitchRotation = RotateX(Camera.Pitch);
+
+    m4x4 CameraRotation = GetIdentity();
+    CameraRotation = CameraPitchRotation * CameraRotation;
+    CameraRotation = CameraYawRotation   * CameraRotation;
+    Camera.Direction = CameraRotation * Target;
+
+    Target     = Camera.Position + Camera.Direction;
+    v3 UpDir   = V3(0, 1, 0);
+    ViewMatrix = LookAt(Camera.Position, Target, UpDir);
+
+    u32 FaceCount = ArrayLength(Mesh->Meshes);
+    for(u32 FaceIndex = 0; 
+        FaceIndex < FaceCount; 
+        ++FaceIndex)
     {
-        SDL_Delay(TimeToWait);
-    }
-
-    Mesh.Rotation += 0.002f;
-    Mesh.Translation.Z = 5.0f;
-
-    m4x4 ScaleMatrix = MakeScaleMatrix(Mesh.Scale.X, Mesh.Scale.Y, Mesh.Scale.Z);
-    m4x4 TranslationMatrix = Translate(GetIdentity(), Mesh.Translation);
-    m4x4 RotationX = RotateX(Mesh.Rotation.X);
-    m4x4 RotationY = RotateY(Mesh.Rotation.Y);
-    m4x4 RotationZ = RotateZ(Mesh.Rotation.Z);
-
-    u32 MeshesCount = ArrayLength(Mesh.Meshes);
-    for(u32 MeshIdx = 0; MeshIdx < MeshesCount; ++MeshIdx)
-    {
-        face_t Face = Mesh.Meshes[MeshIdx];
+        face_t Face = Mesh->Meshes[FaceIndex];
 
         v3 DispatchedVertices[3];
-        DispatchedVertices[0] = Mesh.Vertices[Face.a - 1];
-        DispatchedVertices[1] = Mesh.Vertices[Face.b - 1];
-        DispatchedVertices[2] = Mesh.Vertices[Face.c - 1];
+        DispatchedVertices[0] = Mesh->Vertices[Face.a - 1];
+        DispatchedVertices[1] = Mesh->Vertices[Face.b - 1];
+        DispatchedVertices[2] = Mesh->Vertices[Face.c - 1];
 
-        triangle_t NewPointToRender;
-        v3 TransfermedVertices[3] = {0};
-        for(u32 VertIdx = 0; VertIdx < 3; ++VertIdx)
+        v4 TransfermedVertices[3] = {0};
+
+        for(u32 PointIndex = 0; 
+            PointIndex < 3; 
+            ++PointIndex)
         {
-            v3 Point = DispatchedVertices[VertIdx];
+            v4 Point = V4(DispatchedVertices[PointIndex], 1.0f);
 
-            m4x4 WorldMatrix = GetIdentity();
+            WorldMatrix = GetIdentity();
 
-            WorldMatrix = WorldMatrix*TranslationMatrix;
+            WorldMatrix = WorldMatrix*ScaleMatrix;
             WorldMatrix = WorldMatrix*RotationX;
             WorldMatrix = WorldMatrix*RotationY;
             WorldMatrix = WorldMatrix*RotationZ;
-            WorldMatrix = WorldMatrix*ScaleMatrix;
+            WorldMatrix = WorldMatrix*TranslationMatrix;
             
             Point = WorldMatrix*Point;
+            Point = ViewMatrix *Point;
 
-            TransfermedVertices[VertIdx] = Point;
+            TransfermedVertices[PointIndex] = Point;
         }
 
         // Check backface culling (Culling algorithm)
-        v3 A = TransfermedVertices[0];
-        v3 B = TransfermedVertices[1];
-        v3 C = TransfermedVertices[2];
-
-        v3 AB = B - A; // B - A
-        v3 AC = C - A; // C - A
-        AB *= (1.0f / Length(AB));
-        AC *= (1.0f / Length(AC));
-        v3 Normal = Cross(AB, AC);
-        Normal *= (1.0f / Length(Normal));
+        v3 FaceNormal = GetTriangleNormal(TransfermedVertices);
 
         if(DisplayFlag & DisplayType_Culling)
         {
-            v3 CameraRay = CameraPos - A;
-            r32 Angle = Inner(Normal, CameraRay);
+            v3 CameraRay = V3(0, 0, 0) - TransfermedVertices[0].XYZ;
+            r32 Angle = Inner(FaceNormal, CameraRay);
 
             // Bypass the triangles that are looking away from the camera
             if(Angle < 0)
@@ -383,61 +227,116 @@ update(void)
             }
         }
 
-        for(u32 VertIdx = 0; VertIdx < 3; ++VertIdx)
+        polygon_t Polygon = CreatePolygon(TransfermedVertices[0].XYZ, 
+                                          TransfermedVertices[1].XYZ, 
+                                          TransfermedVertices[2].XYZ, 
+                                          Face.UVs.A_uv, Face.UVs.B_uv, Face.UVs.C_uv);
+        ClipPolygon(&Polygon);
+        
+        i32 TrianglesCount = 0;
+        triangle_t TriangulateResult[MAX_POLY_TRIANGLES_COUNT] = {};
+        TrianglesFromPolygon(&Polygon, TriangulateResult, &TrianglesCount);
+
+        //triangle_t* TriangulatingResult = PolygonTriangulate(&Polygon, &TrianglesCount);
+
+        for(i32 TriangleIndex = 0;
+            TriangleIndex < TrianglesCount;
+            ++TriangleIndex)
         {
-            v3 NewPoint = Project(ProjectionMatrix, ToV4(TransfermedVertices[VertIdx], 0)).XYZ;
+            triangle_t* ClippedTriangle = TriangulateResult + TriangleIndex;
 
-            NewPoint *= V3(window_width / 2.0f, window_height / 2.0f, 1.0f);
-            NewPoint += V3((r32)window_width/2, (r32)window_height/2, 0.0f);
+            v4 ProjectedPoints[3] = {};
+            for (u32 PointIdx = 0;
+                PointIdx < 3;
+                ++PointIdx)
+            {
+                ProjectedPoints[PointIdx] = Project(ProjectionMatrix, ClippedTriangle->points[PointIdx]);
+                
+                ProjectedPoints[PointIdx].Y  *= -1.0f;
+                ProjectedPoints[PointIdx].XY *= V2(GetWindowWidth() / 2.0f, GetWindowHeight() / 2.0f);
+                ProjectedPoints[PointIdx].XY += V2(GetWindowWidth() / 2.0f, GetWindowHeight() / 2.0f);
+            }
 
-            NewPointToRender.points[VertIdx] = NewPoint.XY;
+            r32 LightIntensity = -Inner(FaceNormal, Light.Direction);
+            u32 NewColor = ApplyLightIntensity(Face.Color, LightIntensity);
+
+            triangle_t TriangleToRender = {};
+            TriangleToRender.Color = NewColor;
+            TriangleToRender.Texture = Mesh->Texture;
+            memcpy(TriangleToRender.points, ProjectedPoints, sizeof(v4) * 3);
+            memcpy(TriangleToRender.TextureCoords, ClippedTriangle->TextureCoords, sizeof(tex2d) * 3);
+
+            if (TrianglesToRenderCount < TRIANGLES_PER_MESH)
+            {
+                TrianglesToRender[TrianglesToRenderCount++] = TriangleToRender;
+            }
         }
+    }
+}
 
-        v3 Centroid = (TransfermedVertices[0] + TransfermedVertices[1] + TransfermedVertices[2])* (1.0f/3);
+static void 
+update(void)
+{
+    int TimeToWait = FRAME_TARGET_TIME - (SDL_GetTicks() - PreviousFrameTime);
 
-        v3 LightRay = Light.Direction;
-        r32 LightIntensity = -Inner(Normal, LightRay);
-        u32 NewColor = ApplyLightIntensity(Face.Color, LightIntensity);
-
-        NewPointToRender.AvgDepth = Centroid.Z;
-        NewPointToRender.Color = NewColor;
-
-        ArrayPush(TrianglesToRender, NewPointToRender, triangle_t);
+    if((TimeToWait > 0) && (TimeToWait <= FRAME_TARGET_TIME))
+    {
+        SDL_Delay(TimeToWait);
     }
 
-    Sort(TrianglesToRender, ArrayLength(TrianglesToRender));
+    DeltaTime = (SDL_GetTicks() - PreviousFrameTime) / 1000.0f;
+
+    PreviousFrameTime = SDL_GetTicks();
+
+    TrianglesToRenderCount = 0;
+
+    for(i32 MeshIndex = 0;
+        MeshIndex < MeshesCount;
+        ++MeshIndex)
+    {
+        mesh_t* Mesh = Meshes + MeshIndex;
+        ProcessGraphicsPipeline(Mesh);
+    }
 }
 
 static void 
 render(void)
 {
+    ClearColorBuffer(CreateColor(V4(0.0f, 0.0f, 0.0f, 255.0f)));
+    ClearZBuffer();
+
     DrawGrid(CreateColor(V4(12.75f, 12.75f, 12.75f, 255.0f)));
 
-    
-    u32 TrianglesCount = ArrayLength(TrianglesToRender);
-    for(u32 CoordIdx = 0; CoordIdx < TrianglesCount; ++CoordIdx)
+    for(i32 CoordIdx = 0; 
+        CoordIdx < TrianglesToRenderCount; 
+        ++CoordIdx)
     {
         triangle_t TriangleToRender = TrianglesToRender[CoordIdx];
 
         if(DisplayFlag & DisplayType_FilledTriangles)
         {
-            DrawFilledTriangleFast(TriangleToRender, TriangleToRender.Color);
+            //DrawFilledTriangleFast(TriangleToRender, TriangleToRender.Color);
+            DrawFilledTriangle(TriangleToRender, TriangleToRender.Color);
+        }
+        if(DisplayFlag & DisplayType_Textured)
+        {
+            DrawTexturedTriangle(TriangleToRender, TriangleToRender.Texture);
         }
         if(DisplayFlag & DisplayType_Lines)
         {
-            DrawTriangleFast(TriangleToRender, TriangleToRender.Color);
+            DrawTriangle(TriangleToRender, TriangleToRender.Color);
         }
         if(DisplayFlag & DisplayType_Dots)
         {
             for(u32 PointIdx = 0; PointIdx < 3; ++PointIdx)
             {
-                DrawRect(TriangleToRender.points[PointIdx], 4, 4, CreateColorN(V4(1.0f, 1.0f, 1.0f, 1.0f)));
+                DrawRect(TriangleToRender.points[PointIdx].XY - 3, 6, 6, CreateColorN(V4(1.0f, 1.0f, 1.0f, 1.0f)));
             }
         }
     }
     
-    /*
-    v2 Center = V2(0.5f*window_width, 0.5f*window_height);
+#if 0
+    v2 Center = V2(0.5f*GetWindowWidth(), 0.5f*GetWindowHeight());
 
     shape* Shape = (shape*)malloc(sizeof(shape));
     Shape->VerticesCount = 9;
@@ -454,12 +353,16 @@ render(void)
 
     PolygonTriangulate(Shape);
     
-    for(u32 CoordIdx = 1; CoordIdx < Shape->VerticesCount + 1; ++CoordIdx)
+    for(u32 CoordIdx = 1; 
+        CoordIdx < Shape->VerticesCount + 1; 
+        ++CoordIdx)
     {
         DrawLine(20*Shape->Vertices[(CoordIdx - 1) % Shape->VerticesCount].XY + Center, 20*Shape->Vertices[CoordIdx % Shape->VerticesCount].XY + Center, CreateColor(V3(1.0f, 1.0f, 1.0f)));
     }
 
-    for(u32 CoordIdx = 0; CoordIdx < Shape->TrianglesCount; CoordIdx += 3)
+    for(u32 CoordIdx = 0; 
+        CoordIdx < Shape->TrianglesCount; 
+        CoordIdx += 3)
     {
         triangle_t Triangle = {};
 
@@ -469,22 +372,23 @@ render(void)
 
         DrawTriangle(Triangle, CreateColor(V3(1.0f, 1.0f, 0.0f)));
     }
-    */
-
-    ArrayFree(TrianglesToRender);
+#endif
 
     RenderColorBuffer();
-    ClearColorBuffer(CreateColor(V4(0.0f, 0.0f, 0.0f, 255.0f)));
-
-    SDL_RenderPresent(renderer);
 }
 
 static void
 FreeResources(void)
 {
-    free(color_buffer);
-    ArrayFree(Mesh.Meshes);
-    ArrayFree(Mesh.Vertices);
+    for(i32 MeshIndex = 0;
+        MeshIndex < MeshesCount;
+        ++MeshIndex)
+    {
+        mesh_t* Mesh = Meshes + MeshIndex;
+        ArrayFree(Mesh->Meshes);
+        ArrayFree(Mesh->Vertices);
+        upng_free(Mesh->Texture);
+    }
 }
 
 int main(int argc, char** argv)
