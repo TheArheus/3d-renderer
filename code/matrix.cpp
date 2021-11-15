@@ -18,6 +18,17 @@ inline m4x4 operator*(m4x4 A, m4x4 B)
     return Result;
 }
 
+v3 Transform(m4x4 A, v3 P, r32 Pw)
+{
+    v3 V = {};
+
+    V.X = P.X*A.E[0][0] + P.Y*A.E[0][1] + P.Z*A.E[0][2] + Pw*A.E[0][3];
+    V.Y = P.X*A.E[1][0] + P.Y*A.E[1][1] + P.Z*A.E[1][2] + Pw*A.E[1][3];
+    V.Z = P.X*A.E[2][0] + P.Y*A.E[2][1] + P.Z*A.E[2][2] + Pw*A.E[2][3];
+
+    return V;
+}
+
 v4 Transform(m4x4 A, v4 P)
 {
     v4 V = {};
@@ -33,7 +44,7 @@ v4 Transform(m4x4 A, v4 P)
 inline v3
 operator*(m4x4 A, v3 P)
 {
-    v3 R = Transform(A, V4(P, 1.0f)).XYZ;
+    v3 R = Transform(A, P, 1.0f);
     return R;
 }
 
@@ -49,9 +60,9 @@ m4x4 GetIdentity()
     m4x4 Identity = 
     {
         {{1, 0, 0, 0},
-         {0, 1, 0, 0},
-         {0, 0, 1, 0},
-         {0, 0, 0, 1}}
+        {0, 1, 0, 0},
+        {0, 0, 1, 0},
+        {0, 0, 0, 1}}
     };
 
     return Identity;
@@ -72,9 +83,9 @@ m4x4 Translate(m4x4 A, v3 P)
 {
     m4x4 R = A;
 
-    R.E[0][3] = P.X;
-    R.E[1][3] = P.Y;
-    R.E[2][3] = P.Z;
+    R.E[0][3] += P.X;
+    R.E[1][3] += P.Y;
+    R.E[2][3] += P.Z;
 
     return R;
 }
@@ -108,8 +119,8 @@ v4 Project(m4x4 Proj, v4 V)
 
 m4x4 RotateX(r32 V)
 {
-    r32 c = cosf(V);
-    r32 s = sinf(V);
+    r32 c = sinf(V);
+    r32 s = cosf(V);
 
     m4x4 R = 
     {
@@ -124,15 +135,15 @@ m4x4 RotateX(r32 V)
 
 m4x4 RotateY(r32 V)
 {
-    r32 c = cosf(V);
-    r32 s = sinf(V);
+    r32 c = sinf(V);
+    r32 s = cosf(V);
 
     m4x4 R = 
     {
-        {{ c, 0,  s, 0},
-         { 0, 1,  0, 0},
-         {-s, 0,  c, 0},
-         { 0, 0,  0, 1}}
+        {{c, 0, -s, 0},
+         {0, 1,  0, 0},
+         {s, 0,  c, 0},
+         {0, 0,  0, 1}}
     };
 
     return R;
@@ -140,8 +151,8 @@ m4x4 RotateY(r32 V)
 
 m4x4 RotateZ(r32 V)
 {
-    r32 c = cosf(V);
-    r32 s = sinf(V);
+    r32 c = sinf(V);
+    r32 s = cosf(V);
 
     m4x4 R = 
     {
